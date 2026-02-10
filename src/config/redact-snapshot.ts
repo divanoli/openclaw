@@ -1,4 +1,5 @@
 import type { ConfigFileSnapshot } from "./types.openclaw.js";
+import { listSecretKeys, getSecretValue } from "../agents/auth-profiles/profiles.js";
 
 /**
  * Sentinel value used to replace sensitive config fields in gateway responses.
@@ -75,11 +76,22 @@ function collectSensitiveValues(obj: unknown): string[] {
 }
 
 /**
+ * Collect stored secret values from the auth-profiles store.
+ * These are included in config redaction to prevent accidental exposure.
+ */
+function collectStoredSecretValues(): string[] {
+  return listSecretKeys()
+    .map((key) => getSecretValue({ key }))
+    .filter((v): v is string => typeof v === "string" && v.length > 0);
+}
+
+/**
  * Replace known sensitive values in a raw JSON5 string with the sentinel.
  * Values are replaced longest-first to avoid partial matches.
  */
 function redactRawText(raw: string, config: unknown): string {
   const sensitiveValues = collectSensitiveValues(config);
+  sensitiveValues.push(...collectStoredSecretValues()); // Include stored secrets
   sensitiveValues.sort((a, b) => b.length - a.length);
   let result = raw;
   for (const value of sensitiveValues) {

@@ -1,4 +1,5 @@
 import type { FinalizedMsgContext, MsgContext } from "../templating.js";
+import { listSecretKeys, getSecretValue } from "../../agents/auth-profiles/profiles.js";
 import { normalizeChatType } from "../../channels/chat-type.js";
 import { resolveConversationLabel } from "../../channels/conversation-label.js";
 import { formatInboundBodyWithSenderMeta } from "./inbound-sender-meta.js";
@@ -16,6 +17,36 @@ function normalizeTextField(value: unknown): string | undefined {
     return undefined;
   }
   return normalizeInboundTextNewlines(value);
+}
+
+/**
+ * Redact stored secret values from inbound text before it reaches the LLM.
+ *
+ * IMPORTANT: This runs BEFORE the LLM sees the text, but the Pi SDK persists
+ * the ORIGINAL user message to session transcripts via session.prompt().
+ * Phase 2 protects the LLM context, but only Phase 1 (/secret command) prevents
+ * secret persistence in transcripts.
+ */
+function redactStoredSecrets(text: string): string {
+  if (!text) {
+    return text;
+  }
+  const keys = listSecretKeys();
+  if (keys.length === 0) {
+    return text;
+  }
+
+  // Collect key-value pairs, sort by value length DESC to avoid partial matches
+  const entries = keys
+    .map((key) => ({ key, value: getSecretValue({ key })! }))
+    .filter((e) => e.value && e.value.length >= 4) // skip very short values to avoid false positives
+    .toSorted((a, b) => b.value.length - a.value.length);
+
+  let result = text;
+  for (const { key, value } of entries) {
+    result = result.replaceAll(value, '[REDACTED: stored secret "' + key + '"]');
+  }
+  return result;
 }
 
 export function finalizeInboundContext<T extends Record<string, unknown>>(
@@ -55,6 +86,18 @@ export function finalizeInboundContext<T extends Record<string, unknown>>(
       normalized.RawBody ??
       normalized.Body);
   normalized.BodyForCommands = normalizeInboundTextNewlines(bodyForCommandsSource);
+
+  // Redact stored secrets from inbound text before it reaches the LLM
+  // NOTE: This protects the LLM context but NOT session transcripts (Pi SDK persists original)
+  normalized.Body = redactStoredSecrets(normalized.Body);
+  normalized.BodyForAgent = redactStoredSecrets(normalized.BodyForAgent);
+  normalized.BodyForCommands = redactStoredSecrets(normalized.BodyForCommands);
+  if (normalized.RawBody) {
+    normalized.RawBody = redactStoredSecrets(normalized.RawBody);
+  }
+  if (normalized.CommandBody) {
+    normalized.CommandBody = redactStoredSecrets(normalized.CommandBody);
+  }
 
   const explicitLabel = normalized.ConversationLabel?.trim();
   if (opts.forceConversationLabel || !explicitLabel) {
