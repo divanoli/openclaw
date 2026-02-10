@@ -2,7 +2,8 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { upsertSecretValue, deleteSecretValue, listSecretKeys } from "./auth-profiles/profiles.js";
 
 const oauthFixture = {
   access: "access-token",
@@ -531,5 +532,128 @@ describe("getApiKeyForModel", () => {
         process.env.ANTHROPIC_API_KEY = previous;
       }
     }
+  });
+});
+
+describe("getCustomProviderApiKey", () => {
+  beforeEach(async () => {
+    // Clean up secrets from previous tests
+    const keys = listSecretKeys();
+    for (const key of keys) {
+      await deleteSecretValue({ key });
+    }
+  });
+
+  it("resolves $SECRET:KEY_NAME to stored secret value", async () => {
+    await upsertSecretValue({ key: "XAI_API_KEY", value: "xai-secret-123" });
+
+    vi.resetModules();
+    const { getCustomProviderApiKey } = await import("./model-auth.js");
+
+    const cfg = {
+      models: {
+        providers: {
+          xai: {
+            apiKey: "$SECRET:XAI_API_KEY",
+          },
+        },
+      },
+    };
+
+    const result = getCustomProviderApiKey(cfg, "xai");
+    expect(result).toBe("xai-secret-123");
+  });
+
+  it("returns undefined for missing $SECRET:KEY", async () => {
+    vi.resetModules();
+    const { getCustomProviderApiKey } = await import("./model-auth.js");
+
+    const cfg = {
+      models: {
+        providers: {
+          xai: {
+            apiKey: "$SECRET:MISSING_KEY",
+          },
+        },
+      },
+    };
+
+    const result = getCustomProviderApiKey(cfg, "xai");
+    expect(result).toBeUndefined();
+  });
+
+  it("still works with regular apiKey (no regression)", async () => {
+    vi.resetModules();
+    const { getCustomProviderApiKey } = await import("./model-auth.js");
+
+    const cfg = {
+      models: {
+        providers: {
+          xai: {
+            apiKey: "sk-direct-key",
+          },
+        },
+      },
+    };
+
+    const result = getCustomProviderApiKey(cfg, "xai");
+    expect(result).toBe("sk-direct-key");
+  });
+
+  it("returns undefined when no apiKey configured", async () => {
+    vi.resetModules();
+    const { getCustomProviderApiKey } = await import("./model-auth.js");
+
+    const cfg = {
+      models: {
+        providers: {
+          xai: {},
+        },
+      },
+    };
+
+    const result = getCustomProviderApiKey(cfg, "xai");
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined when provider not in config", async () => {
+    vi.resetModules();
+    const { getCustomProviderApiKey } = await import("./model-auth.js");
+
+    const cfg = {
+      models: {
+        providers: {},
+      },
+    };
+
+    const result = getCustomProviderApiKey(cfg, "nonexistent");
+    expect(result).toBeUndefined();
+  });
+
+  it("normalizes secret input (removes line breaks) from $SECRET value", async () => {
+    // Note: normalizeSecretInput is called on the result of getSecretValue
+    // But since we store via upsertSecretValue which already normalizes,
+    // the stored value should already be clean
+    await upsertSecretValue({
+      key: "KEY_WITH_BREAKS",
+      value: "sk-ant-test-\r\nkey",
+    });
+
+    vi.resetModules();
+    const { getCustomProviderApiKey } = await import("./model-auth.js");
+
+    const cfg = {
+      models: {
+        providers: {
+          anthropic: {
+            apiKey: "$SECRET:KEY_WITH_BREAKS",
+          },
+        },
+      },
+    };
+
+    const result = getCustomProviderApiKey(cfg, "anthropic");
+    // upsertSecretValue normalizes, so stored value is "sk-ant-test-key"
+    expect(result).toBe("sk-ant-test-key");
   });
 });

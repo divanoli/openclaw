@@ -5,10 +5,14 @@ export { resolveApiKeyForProfile } from "./auth-profiles/oauth.js";
 export { resolveAuthProfileOrder } from "./auth-profiles/order.js";
 export { resolveAuthStorePathForDisplay } from "./auth-profiles/paths.js";
 export {
+  deleteSecretValue,
+  getSecretValue,
   listProfilesForProvider,
+  listSecretKeys,
   markAuthProfileGood,
   setAuthProfileOrder,
   upsertAuthProfile,
+  upsertSecretValue,
 } from "./auth-profiles/profiles.js";
 export {
   repairOAuthProfileIdMismatch,

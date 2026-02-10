@@ -1,10 +1,11 @@
 /**
- * Environment variable substitution for config values.
+ * Environment variable and secret store substitution for config values.
  *
- * Supports `${VAR_NAME}` syntax in string values, substituted at config load time.
- * - Only uppercase env vars are matched: `[A-Z_][A-Z0-9_]*`
+ * Supports `${VAR_NAME}` syntax for env vars and `$SECRET:KEY_NAME` for secret store
+ * references. Both are substituted at config load time.
+ * - Only uppercase names matched: `[A-Z_][A-Z0-9_]*`
  * - Escape with `$${}` to output literal `${}`
- * - Missing env vars throw `MissingEnvVarError` with context
+ * - Missing references throw `MissingEnvVarError` with context
  *
  * @example
  * ```json5
@@ -13,6 +14,9 @@
  *     providers: {
  *       "vercel-gateway": {
  *         apiKey: "${VERCEL_GATEWAY_API_KEY}"
+ *       },
+ *       "xai": {
+ *         apiKey: "$SECRET:XAI_API_KEY"
  *       }
  *     }
  *   }
@@ -20,7 +24,9 @@
  * ```
  */
 
-// Pattern for valid uppercase env var names: starts with letter or underscore,
+import { getSecretValue } from "../agents/auth-profiles/profiles.js";
+
+// Pattern for valid uppercase env var/secret key names: starts with letter or underscore,
 // followed by letters, numbers, or underscores (all uppercase)
 const ENV_VAR_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
 
@@ -70,6 +76,32 @@ function substituteString(value: string, env: NodeJS.ProcessEnv, configPath: str
           chunks.push(`\${${name}}`);
           i = end;
           continue;
+        }
+      }
+    }
+
+    // Secret store reference: $SECRET:KEY_NAME -> stored secret value
+    if (next === "S") {
+      const prefix = "$SECRET:";
+      const candidate = value.slice(i, i + prefix.length);
+      if (candidate === prefix) {
+        const start = i + prefix.length;
+        // Find the end of the key name (first non-matching char)
+        let end = start;
+        while (end < value.length && /[A-Z0-9_]/.test(value[end]!)) {
+          end++;
+        }
+        if (end > start) {
+          const keyName = value.slice(start, end);
+          if (ENV_VAR_NAME_PATTERN.test(keyName)) {
+            const secretValue = getSecretValue({ key: keyName });
+            if (secretValue === undefined) {
+              throw new MissingEnvVarError("$SECRET:" + keyName, configPath + " (secret store)");
+            }
+            chunks.push(secretValue);
+            i = end - 1; // -1 because the loop increments
+            continue;
+          }
         }
       }
     }

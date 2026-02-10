@@ -1,7 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  upsertSecretValue,
+  deleteSecretValue,
+  listSecretKeys,
+} from "../agents/auth-profiles/profiles.js";
 import { MissingEnvVarError, resolveConfigEnvVars } from "./env-substitution.js";
 
 describe("resolveConfigEnvVars", () => {
+  beforeEach(async () => {
+    // Clean up secrets from previous tests
+    const keys = listSecretKeys();
+    for (const key of keys) {
+      await deleteSecretValue({ key });
+    }
+  });
+
   describe("basic substitution", () => {
     it("substitutes a single env var", () => {
       const result = resolveConfigEnvVars({ key: "${FOO}" }, { FOO: "bar" });
@@ -281,6 +294,115 @@ describe("resolveConfigEnvVars", () => {
             custom: {
               baseUrl: "https://api.example.com/v1",
             },
+          },
+        },
+      });
+    });
+  });
+
+  describe("$SECRET:KEY_NAME secret store references", () => {
+    it("resolves $SECRET:KEY to stored secret value", async () => {
+      await upsertSecretValue({ key: "MY_API_KEY", value: "sk-secret-123" });
+
+      const result = resolveConfigEnvVars({ key: "$SECRET:MY_API_KEY" }, {});
+
+      expect(result).toEqual({ key: "sk-secret-123" });
+    });
+
+    it("throws MissingEnvVarError for missing secret", () => {
+      expect(() => resolveConfigEnvVars({ key: "$SECRET:MISSING_KEY" }, {})).toThrow(
+        MissingEnvVarError,
+      );
+    });
+
+    it("includes secret reference in error for missing secret", () => {
+      try {
+        resolveConfigEnvVars({ key: "$SECRET:MISSING_KEY" }, {});
+        throw new Error("Expected to throw");
+      } catch (err) {
+        expect(err).toBeInstanceOf(MissingEnvVarError);
+        const error = err as MissingEnvVarError;
+        expect(error.varName).toBe("$SECRET:MISSING_KEY");
+        expect(error.configPath).toContain("secret store");
+      }
+    });
+
+    it("mixes $SECRET: and ${ENV} in same string", async () => {
+      await upsertSecretValue({ key: "API_KEY", value: "sk-secret" });
+
+      // The colon between $SECRET:API_KEY and ${ENV_SUFFIX} is literal text
+      const result = resolveConfigEnvVars(
+        { key: "$SECRET:API_KEY:${ENV_SUFFIX}" },
+        { ENV_SUFFIX: "-prod" },
+      );
+
+      expect(result).toEqual({ key: "sk-secret:-prod" });
+    });
+
+    it("does not match lowercase $SECRET:key (uppercase only)", async () => {
+      await upsertSecretValue({ key: "UPPERCASE", value: "secret" });
+
+      // lowercase 'key' after $SECRET: should NOT match
+      const result = resolveConfigEnvVars({ key: "$SECRET:lowercase" }, {});
+
+      // Left unchanged because lowercase doesn't match ENV_VAR_NAME_PATTERN
+      expect(result).toEqual({ key: "$SECRET:lowercase" });
+    });
+
+    it("does not match $SECRET:KEY123INVALID (must start with letter or underscore)", async () => {
+      const result = resolveConfigEnvVars({ key: "$SECRET:123INVALID" }, {});
+
+      // Left unchanged because it doesn't start with letter/underscore
+      expect(result).toEqual({ key: "$SECRET:123INVALID" });
+    });
+
+    it("leaves literal $SECRET text alone if no valid key follows", () => {
+      const result = resolveConfigEnvVars({ key: "$SECRET" }, {});
+      expect(result).toEqual({ key: "$SECRET" });
+    });
+
+    it("leaves $SECRET: alone if no key name follows", () => {
+      const result = resolveConfigEnvVars({ key: "$SECRET:" }, {});
+      expect(result).toEqual({ key: "$SECRET:" });
+    });
+
+    it("resolves multiple $SECRET: references", async () => {
+      await upsertSecretValue({ key: "KEY_ONE", value: "value-one" });
+      await upsertSecretValue({ key: "KEY_TWO", value: "value-two" });
+
+      const result = resolveConfigEnvVars({ key: "$SECRET:KEY_ONE:$SECRET:KEY_TWO" }, {});
+
+      expect(result).toEqual({ key: "value-one:value-two" });
+    });
+
+    it("resolves $SECRET:KEY with underscore prefix", async () => {
+      await upsertSecretValue({ key: "_PRIVATE", value: "private-value" });
+
+      const result = resolveConfigEnvVars({ key: "$SECRET:_PRIVATE" }, {});
+
+      expect(result).toEqual({ key: "private-value" });
+    });
+
+    it("works with nested provider configs", async () => {
+      await upsertSecretValue({ key: "XAI_KEY", value: "xai-secret" });
+      await upsertSecretValue({ key: "OPENAI_KEY", value: "openai-secret" });
+
+      const config = {
+        models: {
+          providers: {
+            xai: { apiKey: "$SECRET:XAI_KEY" },
+            openai: { apiKey: "$SECRET:OPENAI_KEY" },
+          },
+        },
+      };
+
+      const result = resolveConfigEnvVars(config, {});
+
+      expect(result).toEqual({
+        models: {
+          providers: {
+            xai: { apiKey: "xai-secret" },
+            openai: { apiKey: "openai-secret" },
           },
         },
       });

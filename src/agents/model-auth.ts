@@ -11,6 +11,7 @@ import {
 import {
   type AuthProfileStore,
   ensureAuthProfileStore,
+  getSecretValue,
   listProfilesForProvider,
   resolveApiKeyForProfile,
   resolveAuthProfileOrder,
@@ -52,7 +53,12 @@ export function getCustomProviderApiKey(
   provider: string,
 ): string | undefined {
   const entry = resolveProviderConfig(cfg, provider);
-  return normalizeOptionalSecretInput(entry?.apiKey);
+  const raw = entry?.apiKey;
+  if (typeof raw === "string" && raw.startsWith("$SECRET:")) {
+    const key = raw.slice("$SECRET:".length);
+    return getSecretValue({ key }) ?? undefined;
+  }
+  return normalizeOptionalSecretInput(raw);
 }
 
 function resolveProviderAuthOverride(
