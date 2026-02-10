@@ -63,6 +63,8 @@ export type AuthProfileStore = {
   lastGood?: Record<string, string>;
   /** Usage statistics per profile for round-robin rotation */
   usageStats?: Record<string, ProfileUsageStats>;
+  /** Secure key-value secret storage (Phase 1). Keys: UPPER_SNAKE_CASE. */
+  secrets?: Record<string, string>;
 };
 
 export type AuthProfileIdRepairResult = {

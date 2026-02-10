@@ -16,6 +16,7 @@ function _syncAuthProfileStore(target: AuthProfileStore, source: AuthProfileStor
   target.order = source.order;
   target.lastGood = source.lastGood;
   target.usageStats = source.usageStats;
+  target.secrets = source.secrets;
 }
 
 export async function updateAuthProfileStoreWithLock(params: {
@@ -126,6 +127,18 @@ function coerceAuthStore(raw: unknown): AuthProfileStore | null {
       record.usageStats && typeof record.usageStats === "object"
         ? (record.usageStats as Record<string, ProfileUsageStats>)
         : undefined,
+    secrets:
+      record.secrets && typeof record.secrets === "object"
+        ? Object.entries(record.secrets as Record<string, unknown>).reduce(
+            (acc, [key, val]) => {
+              if (typeof val === "string") {
+                acc[key] = val;
+              }
+              return acc;
+            },
+            {} as Record<string, string>,
+          )
+        : undefined,
   };
 }
 
@@ -153,7 +166,8 @@ function mergeAuthProfileStores(
     Object.keys(override.profiles).length === 0 &&
     !override.order &&
     !override.lastGood &&
-    !override.usageStats
+    !override.usageStats &&
+    !override.secrets
   ) {
     return base;
   }
@@ -163,6 +177,7 @@ function mergeAuthProfileStores(
     order: mergeRecord(base.order, override.order),
     lastGood: mergeRecord(base.lastGood, override.lastGood),
     usageStats: mergeRecord(base.usageStats, override.usageStats),
+    secrets: mergeRecord(base.secrets, override.secrets),
   };
 }
 
@@ -373,6 +388,7 @@ export function saveAuthProfileStore(store: AuthProfileStore, agentDir?: string)
     order: store.order ?? undefined,
     lastGood: store.lastGood ?? undefined,
     usageStats: store.usageStats ?? undefined,
+    secrets: store.secrets ?? undefined,
   } satisfies AuthProfileStore;
   saveJsonFile(authPath, payload);
 }

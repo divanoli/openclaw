@@ -54,6 +54,8 @@ const RESERVED_COMMANDS = new Set([
   "model",
   "models",
   "queue",
+  "secret",
+  "s",
   // Messaging
   "send",
   // Execution

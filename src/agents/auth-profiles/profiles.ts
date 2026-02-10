@@ -73,6 +73,87 @@ export function listProfilesForProvider(store: AuthProfileStore, provider: strin
     .map(([id]) => id);
 }
 
+// ─── Secret CRUD ────────────────────────────────────────────────
+
+const SECRET_KEY_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
+const MAX_SECRET_VALUE_LENGTH = 16_384; // 16KB soft limit
+
+export function validateSecretKey(key: string): string | null {
+  if (!key) {
+    return "Secret key cannot be empty";
+  }
+  if (!SECRET_KEY_PATTERN.test(key)) {
+    return "Secret key must be UPPER_SNAKE_CASE (e.g., MY_API_KEY)";
+  }
+  if (key.startsWith("__")) {
+    return "Secret keys starting with __ are reserved";
+  }
+  return null;
+}
+
+export async function upsertSecretValue(params: {
+  key: string;
+  value: string;
+  agentDir?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const keyError = validateSecretKey(params.key);
+  if (keyError) {
+    return { ok: false, error: keyError };
+  }
+
+  const normalized = normalizeSecretInput(params.value);
+  if (!normalized) {
+    return { ok: false, error: "Secret value cannot be empty" };
+  }
+  if (normalized.length > MAX_SECRET_VALUE_LENGTH) {
+    return { ok: false, error: `Secret value exceeds ${MAX_SECRET_VALUE_LENGTH} byte limit` };
+  }
+
+  const result = await updateAuthProfileStoreWithLock({
+    agentDir: params.agentDir,
+    updater: (store) => {
+      store.secrets = store.secrets ?? {};
+      store.secrets[params.key] = normalized;
+      return true;
+    },
+  });
+  return result ? { ok: true } : { ok: false, error: "Failed to acquire store lock" };
+}
+
+export function getSecretValue(params: { key: string; agentDir?: string }): string | undefined {
+  const store = ensureAuthProfileStore(params.agentDir);
+  return store.secrets?.[params.key];
+}
+
+export function listSecretKeys(params?: { agentDir?: string }): string[] {
+  const store = ensureAuthProfileStore(params?.agentDir);
+  return Object.keys(store.secrets ?? {}).toSorted();
+}
+
+export async function deleteSecretValue(params: {
+  key: string;
+  agentDir?: string;
+}): Promise<{ ok: boolean; existed: boolean }> {
+  let existed = false;
+  const result = await updateAuthProfileStoreWithLock({
+    agentDir: params.agentDir,
+    updater: (store) => {
+      if (!store.secrets?.[params.key]) {
+        return false;
+      }
+      existed = true;
+      delete store.secrets[params.key];
+      if (Object.keys(store.secrets).length === 0) {
+        store.secrets = undefined;
+      }
+      return true;
+    },
+  });
+  return result ? { ok: true, existed } : { ok: false, existed: false };
+}
+
+// ─── Auth Profile Helpers ───────────────────────────────────────
+
 export async function markAuthProfileGood(params: {
   store: AuthProfileStore;
   provider: string;

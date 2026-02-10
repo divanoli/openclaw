@@ -408,6 +408,42 @@ function buildChatCommands(): ChatCommandDefinition[] {
       category: "session",
     }),
     defineChatCommand({
+      key: "secret",
+      nativeName: "secret",
+      description: "Manage stored secrets (keys/tokens).",
+      textAlias: "/secret",
+      category: "management",
+      args: [
+        {
+          name: "action",
+          description: "set, get, list, delete, or import-env",
+          type: "string",
+          choices: ["set", "get", "list", "delete", "import-env"],
+        },
+        {
+          name: "key",
+          description: "Secret key name (UPPER_SNAKE_CASE)",
+          type: "string",
+        },
+        {
+          name: "value",
+          description: "Secret value (for set)",
+          type: "string",
+          captureRemaining: true,
+        },
+      ],
+      argsMenu: {
+        arg: "action",
+        title:
+          "Secret Actions:\n" +
+          "• set – Store a secret value\n" +
+          "• get – Check if a secret exists\n" +
+          "• list – List stored secret names\n" +
+          "• delete – Remove a secret\n" +
+          "• import-env – Import from environment variable",
+      },
+    }),
+    defineChatCommand({
       key: "compact",
       description: "Compact the session context.",
       textAlias: "/compact",
@@ -582,6 +618,7 @@ function buildChatCommands(): ChatCommandDefinition[] {
   registerAlias(commands, "verbose", "/v");
   registerAlias(commands, "reasoning", "/reason");
   registerAlias(commands, "elevated", "/elev");
+  registerAlias(commands, "secret", "/s");
 
   assertCommandRegistry(commands);
   return commands;

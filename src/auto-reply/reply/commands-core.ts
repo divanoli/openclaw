@@ -21,6 +21,7 @@ import {
 } from "./commands-info.js";
 import { handleModelsCommand } from "./commands-models.js";
 import { handlePluginCommand } from "./commands-plugin.js";
+import { handleSecretCommand } from "./commands-secret.js";
 import {
   handleAbortTrigger,
   handleActivationCommand,
@@ -38,7 +39,9 @@ let HANDLERS: CommandHandler[] | null = null;
 export async function handleCommands(params: HandleCommandsParams): Promise<CommandHandlerResult> {
   if (HANDLERS === null) {
     HANDLERS = [
-      // Plugin commands are processed first, before built-in commands
+      // Secret commands intercepted first — never reach LLM pipeline
+      handleSecretCommand,
+      // Plugin commands are processed next, before built-in commands
       handlePluginCommand,
       handleBashCommand,
       handleActivationCommand,
